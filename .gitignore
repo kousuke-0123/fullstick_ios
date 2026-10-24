@@ -3,3 +3,5 @@ Frameworks/
 xcuserdata/
 build/
 DerivedData/
+apikey/
+*.p8
