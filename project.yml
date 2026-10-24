@@ -16,7 +16,7 @@ targets:
       - SensorLink
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: jp.jphacks.sensorlink
+        PRODUCT_BUNDLE_IDENTIFIER: com.kousu.fullstick
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_OBJC_BRIDGING_HEADER: SensorLink/SensorLink-Bridging-Header.h
         FRAMEWORK_SEARCH_PATHS: $(PROJECT_DIR)/Frameworks
