@@ -33,13 +33,14 @@ jobs:
   testflight:
     if: ${{ inputs.testflight }}
     needs: build
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       TEAM_ID: ${{ secrets.TEAM_ID }}
       KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v4
+      - run: xcodebuild -version
       - run: brew install xcodegen
       - run: ./scripts/fetch-opencv.sh
       - run: DEVELOPMENT_TEAM="$TEAM_ID" xcodegen generate
