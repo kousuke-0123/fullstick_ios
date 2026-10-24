@@ -26,7 +26,7 @@ final class TagDetector {
         var found = [(id: Int, c: [Double])]()
         if rune {
             let g = [UInt8](f.gray.data)
-            for m in Rune.detect(g, f.gray.width, f.gray.height) { found.append((m.id, m.corners)) }
+            for m in Rune.detect(g, Int(f.gray.width), Int(f.gray.height)) { found.append((m.id, m.corners)) }
         }
         for t in bridge.detectAprilTags(f.gray) {
             guard let id = (t["id"] as? NSNumber)?.intValue, let c = t["c"] as? [NSNumber] else { continue }
