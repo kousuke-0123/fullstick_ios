@@ -14,7 +14,7 @@
 
 ```
 brew install xcodegen
-cd product/ios
+cd <this repo>
 ./scripts/fetch-opencv.sh          # 公式の OpenCV iOS framework（4.10.0）を Frameworks/ に置く
 DEVELOPMENT_TEAM=XXXXXXXXXX xcodegen generate     # SensorLink.xcodeproj ができる（git には入れない）
 open SensorLink.xcodeproj          # 実機（iPhone）を選んで Run
