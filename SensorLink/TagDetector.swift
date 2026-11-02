@@ -11,12 +11,12 @@ struct TagFrame {
 }
 
 /// Black-square size (m) of every tag. The printed paper is 200 mm square with a white margin of a tenth on each side, so the black square is 160 mm.
-/// A RuneTag (marker rune, ids 0-3) reports the corners of its virtual 200 mm square instead (Rune.SQUARE).
+/// A RuneTag (marker rune, the mahoujin ids 0-6) reports the corners of its virtual 224 mm square instead (Rune.SQUARE).
 func tagSizeOf(_ id: Int, rune: Bool = false) -> Double {
     rune && Rune.IDS.contains(id) ? Rune.SQUARE : 0.16
 }
 
-/// AprilTag tag36h11 via OpenCV's aruco module (and RuneTags 0-3 via Rune.swift when `rune`), pose by solvePnP.
+/// AprilTag tag36h11 via OpenCV's aruco module (and RuneTags 0-6 via Rune.swift when `rune`), pose by solvePnP.
 /// Positions in the OpenCV camera frame (x right, y down, z forward), metres. Output matches Vision.kt packet for packet.
 final class TagDetector {
     private let bridge = TagBridge()
@@ -27,6 +27,10 @@ final class TagDetector {
         let w = Double(f.gray.width), h = Double(f.gray.height)
         var found = [(id: Int, c: [Double])]()
         var runeInfo = "rune off"
+        // AprilTags on another core while the RuneTags are read
+        var april = [[AnyHashable: Any]]()
+        let aprilDone = DispatchGroup()
+        DispatchQueue.global(qos: .userInitiated).async(group: aprilDone) { [bridge] in april = bridge.detectAprilTags(f.gray) }
         if rune {
             let t0 = Date()
             let g = [UInt8](f.gray.data)
@@ -34,7 +38,7 @@ final class TagDetector {
             for m in runes { found.append((m.id, m.corners)) }
             runeInfo = String(format: "rune %d in %.0f ms", runes.count, Date().timeIntervalSince(t0) * 1000)
         }
-        let april = bridge.detectAprilTags(f.gray)
+        aprilDone.wait()
         info = String(format: "img %dx%d mean %.0f  %@  april %d  rejected %d", f.gray.width, f.gray.height, bridge.lastMean, runeInfo, april.count, bridge.lastRejected)
         for t in april {
             guard let id = (t["id"] as? NSNumber)?.intValue, let c = t["c"] as? [NSNumber] else { continue }
