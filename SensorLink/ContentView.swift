@@ -1,10 +1,13 @@
 import SwiftUI
+import WebKit
 
 /// Camera picture with the detected tags drawn on top, the status lines, and the three buttons (IMU / Calibrate / LAN).
 struct ContentView: View {
     @EnvironmentObject var model: Model
     @State private var showImu = false
     @State private var showLan = false
+    @State private var showStick = false
+    @State private var showScan = false
 
     var body: some View {
         ZStack {
@@ -32,6 +35,9 @@ struct ContentView: View {
                     Button("IMU") { showImu = true }
                     Button("Calibrate") { model.calibrate() }
                     Button("LAN") { showLan = true }
+                    Button(model.scanStep == .off ? "Scan" : model.scanStep == .bg ? "Stick placed" : "Finish") { showScan = true }
+                    Button("枝") { showStick = true }
+                        .disabled(model.inMatch) // no stick changes during a match
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
@@ -39,9 +45,55 @@ struct ContentView: View {
                 .background(Color.black.opacity(0.6))
             }
             .padding(.horizontal, 8)
+            Color.red.opacity(model.hitRed).ignoresSafeArea().allowsHitTesting(false) // a hit: over everything, buttons too
         }
         .sheet(isPresented: $showImu) { ImuSheet().environmentObject(model) }
         .sheet(isPresented: $showLan) { LanSheet().environmentObject(model) }
+        .sheet(isPresented: $showStick) { StickSheet(url: URL(string: "http://\(model.host):\(model.port)/sticks.html")!).environmentObject(model) }
+        .alert(scanTitle, isPresented: $showScan) {
+            switch model.scanStep {
+            case .off:
+                Button("Start") { model.scanStart() }
+                Button("Cancel", role: .cancel) {}
+            case .bg:
+                Button("Start") { model.scanNext() }
+                Button("Cancel scan", role: .destructive) { model.scanCancel() }
+                Button("Back", role: .cancel) {}
+            case .stick:
+                Button("Send to PC") { model.scanFinish() }
+                Button("Cancel scan", role: .destructive) { model.scanCancel() }
+                Button("Keep scanning", role: .cancel) {}
+            }
+        } message: { Text(scanMessage) }
+    }
+
+    // The stick scan, step by step (Scan.swift; the same words as the Android app)
+    private var scanTitle: String {
+        switch model.scanStep {
+        case .off: return "Scan the stick  1/2: the empty magic circle"
+        case .bg: return "Scan the stick  2/2: the stick"
+        case .stick: return "Finish the scan?"
+        }
+    }
+
+    private var scanMessage: String {
+        switch model.scanStep {
+        case .off:
+            return "The PC turns photos into a 3D model of your stick. Open the PC dashboard first (connection screen).\n\n" +
+                "1. Lay the magic circle flat, with nothing on it yet.\n" +
+                "2. Tap Start, then walk once around the circle holding the phone 0.8-1.2 m away, pointed at its centre.\n" +
+                "3. A photo is taken every half second while 2 or more tags show green. Keep your shadow off the circle.\n\n" +
+                "When it says \(Scan.maxBg) pictures (or after one lap), tap \"Stick placed\"."
+        case .bg:
+            return "1. Lay the stick straight across the middle of the circle, its TIP toward tag T0 (the top of the poster).\n" +
+                "2. From now on don't move the circle or the stick.\n" +
+                "3. Tap Start and walk slowly around it twice: once high, looking down, and once low, about 30° above the floor. " +
+                "Keep 2+ tags green; get the whole stick in the picture.\n" +
+                "4. Tap Finish (after ~25 pictures). The model appears on the PC's connection screen and in the game."
+        case .stick:
+            let c = model.scan.counts
+            return "\(c.bg) pictures of the circle, \(c.stick) of the stick. The PC needs 3 and 6 at least; more angles give a better model."
+        }
     }
 }
 
@@ -139,4 +191,40 @@ struct LanSheet: View {
         }
         .onAppear { host = model.host; port = String(model.port) }
     }
+}
+
+/// The PC's branch-scan page (sticks.html) inside the app: its photo button opens the camera, and the page measures and uploads.
+struct StickSheet: View {
+    let url: URL
+    @EnvironmentObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if model.lanUp {
+                    WebView(url: url)
+                } else {
+                    VStack(spacing: 12) {
+                        Text("PC につながっていません").font(.headline)
+                        Text("閉じて LAN を開き、PC の IP とポートを入れてください。\n今の行き先: \(url.host ?? "") : \(url.port ?? 0)")
+                            .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
+                    }.padding()
+                }
+            }
+                .navigationTitle("枝をスキャン")
+                .navigationBarTitleDisplayMode(.inline)
+                .navigationBarItems(trailing: Button("閉じる") { dismiss() })
+        }
+    }
+}
+
+struct WebView: UIViewRepresentable {
+    let url: URL
+    func makeUIView(context: Context) -> WKWebView {
+        let v = WKWebView()
+        v.load(URLRequest(url: url))
+        return v
+    }
+    func updateUIView(_ v: WKWebView, context: Context) {}
 }
