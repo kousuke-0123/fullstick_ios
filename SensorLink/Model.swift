@@ -27,6 +27,11 @@ final class Model: NSObject, ObservableObject, ARSessionDelegate {
     @Published var found: [ImuDevice] = []
     /// A hit: the whole screen blinks pure #FF0000 (ContentView) for as long as the hit lasts
     @Published var hitRed = 0.0
+    /// The HP screen (ContentView HpScreen): open, and what it shows (this player's HP, the opponent's, their distance). It opens by the HP button or when a match starts.
+    @Published var hpOpen = false
+    @Published var hp = HpInfo()
+    @Published private(set) var matchPhase = "setup"
+    private var brightnessBefore: CGFloat?
     private var hitRedUntil = Date.distantPast
     private var hitTimer: Timer?
     @Published var scanning = false
@@ -87,6 +92,13 @@ final class Model: NSObject, ObservableObject, ARSessionDelegate {
         link.onCharge = { [weak self] el, tier, level in self?.chargeSound.charge(element: el, tier: tier, level: level) }
         link.onSound = { [weak self] voices in self?.gameSound.play(voices) }
         link.onChargeFail = { [weak self] in self?.chargeSound.fail() }
+        link.onHp = { [weak self] info in DispatchQueue.main.async { self?.hp = info } }
+        link.onPhase = { [weak self] p in DispatchQueue.main.async {
+            guard let self = self else { return }
+            self.matchPhase = p
+            if p == "countdown" || p == "fight" { self.openHp() }
+            else if p == "setup" { self.closeHp() }
+        } }
         session.delegate = self
         session.delegateQueue = arQueue
     }
@@ -100,6 +112,16 @@ final class Model: NSObject, ObservableObject, ARSessionDelegate {
         cfg.isAutoFocusEnabled = true
         session.run(cfg)
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.refresh() }
+    }
+
+    /// The HP screen: the screen as bright as it goes while it is up, as it was after.
+    func openHp() {
+        guard !hpOpen else { return }
+        brightnessBefore = UIScreen.main.brightness; UIScreen.main.brightness = 1; hpOpen = true
+    }
+    func closeHp() {
+        guard hpOpen, matchPhase != "countdown", matchPhase != "fight" else { return }
+        hpOpen = false; if let b = brightnessBefore { UIScreen.main.brightness = b }; brightnessBefore = nil
     }
 
     /// A hit: the screen blinks pure red (on 60 ms / off 40 ms) until `ms` from now; a newer hit only makes it last longer.
@@ -126,7 +148,7 @@ final class Model: NSObject, ObservableObject, ARSessionDelegate {
     private func flash(ms: Int) {
         torchQ.async { [weak self] in
             guard let self = self, let dev = AVCaptureDevice.default(for: .video), dev.hasTorch else { return }
-            let off = DispatchTime.now() + .milliseconds(ms)
+            let off = DispatchTime.now() + .milliseconds(max(ms, 400)) // at least 0.4 s: a 小's 120 ms was too short to see (Android the same)
             guard off > self.torchOff else { return }
             self.torchOff = off
             guard (try? dev.lockForConfiguration()) != nil else { return }
@@ -277,7 +299,7 @@ final class Model: NSObject, ObservableObject, ARSessionDelegate {
         prefs.removeObject(forKey: "imu")
     }
 
-    private func showToast(_ s: String) {
+    func showToast(_ s: String) {
         toast = s
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             if self?.toast == s { self?.toast = nil }

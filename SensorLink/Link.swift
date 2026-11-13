@@ -37,6 +37,10 @@ final class Link: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate 
     var phase: String { lock.lock(); defer { lock.unlock() }; return _phase }
     /// The PC says this phone's player was hit: light the torch for this many ms. Set before connect; called on the socket's queue.
     var onFlash: ((Int) -> Void)?
+    /// This player's HP, the opponent's and how far it is (`hp`, dashboard app.js), for the HP screen. The socket's queue.
+    var onHp: ((HpInfo) -> Void)?
+    /// The game phase changed (setup / countdown / fight / result): the HP screen opens when a match starts. The socket's queue.
+    var onPhase: ((String) -> Void)?
     /// The PC's vibration word: charge, win or off (Vibe.swift). Set before connect; called on the socket's queue.
     var onVibrate: ((String) -> Void)?
     /// A `vibrate` charge packet also says what the PC's charge sound is doing: element, tier (s / m / l), level 0...1.
@@ -45,6 +49,8 @@ final class Link: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate 
     var onSound: (([[String: Any]]) -> Void)?
     /// The charge broke off (`sfx` kind chargeFail): ChargeSound.fail. The socket's queue.
     var onChargeFail: (() -> Void)?
+    /// The saved sticks with their models and the one this slot uses (`stickList`, server.mjs), for the Stick menu. The socket's queue.
+    var onStickList: (([String: Any]) -> Void)?
     /// The PC's word on this slot's scanned stick (dashboard stickscan.js): "91 cm", "none", or nil before it said anything.
     var stick: String? { lock.lock(); defer { lock.unlock() }; return _stick }
 
@@ -144,7 +150,14 @@ final class Link: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate 
         case "marker":
             if let m = k["marker"] as? String { lock.lock(); _marker = m; lock.unlock() }
         case "match":
-            if let p = k["phase"] as? String { lock.lock(); _phase = p; lock.unlock() }
+            if let p = k["phase"] as? String { lock.lock(); let was = _phase; _phase = p; lock.unlock(); if p != was { onPhase?(p) } }
+        case "hp":
+            if let hp = (k["hp"] as? NSNumber)?.doubleValue, let mx = (k["max"] as? NSNumber)?.doubleValue {
+                let num: (String, Double) -> Double = { key, d in (k[key] as? NSNumber)?.doubleValue ?? d }
+                let fs = k["foeSlot"] as? String
+                onHp?(HpInfo(hp: hp, max: mx, foeSlot: fs == "A" || fs == "B" ? fs : nil, foeChara: (k["foeChara"] as? String) ?? "wizard",
+                             foeHp: num("foeHp", 100), foeMax: num("foeMax", 100), dist: num("dist", 0)))
+            }
         case "flash":
             if let ms = (k["ms"] as? NSNumber)?.intValue { onFlash?(ms) }
         case "sfx":
@@ -157,6 +170,8 @@ final class Link: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate 
         case "stick":
             let len = ((k["model"] as? [String: Any])?["length"] as? NSNumber)?.doubleValue
             lock.lock(); _stick = len.map { String(format: "%.0f cm", $0 * 100) } ?? "none"; lock.unlock()
+        case "stickList":
+            onStickList?(k)
         case "full":
             lock.lock(); _status = "PC already has 2 phones"; lock.unlock()
         default:
@@ -220,4 +235,15 @@ final class Link: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         retry(generation(of: task), error.map { "error: \($0.localizedDescription)" } ?? "closed")
     }
+}
+
+/// The `hp` message: this player's HP and its most; the opponent (foeSlot nil: a PC too old to tell), its HP and character; their distance along the floor, m.
+struct HpInfo: Equatable {
+    var hp = 100.0
+    var max = 100.0
+    var foeSlot: String? = nil
+    var foeChara = "wizard"
+    var foeHp = 100.0
+    var foeMax = 100.0
+    var dist = 0.0
 }
