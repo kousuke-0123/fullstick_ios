@@ -200,27 +200,27 @@ struct LanSheet: View {
     }
 }
 
-/// The HP screen (match mode), on black and at full brightness. The display fills the top half,
-/// mirrored vertically to match Android. Both HP bars are flat with parallel slanted ends.
-/// The opponent's avatar and bar at full size however far it is (no perspective; Android the same). A long press calibrates, mid-match too.
+/// The HP screen (match mode), on black and at full brightness: two pill-shaped bars (ends fully rounded), no pictures, in the
+/// top 70%, mirrored vertically to match Android. The opponent's is 80% of the own one both ways. The player looks at the
+/// opponent (in the acrylic's reflection), the chest and its phone are turned foeYaw off that (Model.foeTurn): the bars turn
+/// by that turn as seen on the tilted screen (a turn about the vertical shows on it times how much the screen faces up) and
+/// are as big as fits: their outermost points touch the area's edges (Android's HpBar the same). A long press calibrates, mid-match too.
 struct HpScreen: View {
     @EnvironmentObject var model: Model
+    // in units of the own bar's length, centred on 0: the opponent's (80% of the own one, both ways) above, a gap, the own one
+    private static let foeR = CGRect(x: -0.4, y: -0.174, width: 0.8, height: 0.128)
+    private static let mineR = CGRect(x: -0.5, y: 0.014, width: 1, height: 0.16)
 
     var body: some View {
         GeometryReader { g in
-            let w = g.size.width, h = g.size.height / 2, info = model.hp
+            let w = g.size.width, h = g.size.height * 0.7, info = model.hp
+            // tried on the rig: a foe to the left turns it anticlockwise on the screen (clockwise as drawn, then flipped)
+            let turn = atan2(sin(model.foeTurn) * model.screenUp, cos(model.foeTurn))
             ZStack(alignment: .topLeading) {
                 Color.black
-                ZStack(alignment: .topLeading) {
-                    if let slot = info.foeSlot { // nil: a PC too old to say who the opponent is
-                        foe(info, slot: slot, w: w, h: h)
-                            .frame(width: w, height: h, alignment: .topLeading)
-                    }
-                    mine(info, w: w, h: h)
-                        .frame(width: w, height: h, alignment: .topLeading)
-                }
-                .frame(width: w, height: h, alignment: .topLeading)
-                .scaleEffect(x: 1, y: -1) // mirror the HP display vertically, as Android's HpBar does
+                Canvas { ctx, size in draw(ctx, size, info, turn) }
+                    .frame(width: w, height: h)
+                    .scaleEffect(x: 1, y: -1) // mirror the HP display vertically, as Android's HpBar does
                 if model.matchPhase != "countdown" && model.matchPhase != "fight" {
                     VStack {
                         Spacer()
@@ -239,77 +239,43 @@ struct HpScreen: View {
 
     private func share(_ v: Double, _ m: Double) -> CGFloat { CGFloat(Swift.max(0, Swift.min(1, v / Swift.max(1, m)))) }
 
-    private func foe(_ info: HpInfo, slot: String, w: CGFloat, h: CGFloat) -> some View {
-        let size: CGFloat = Swift.min(h * 0.42, w * 0.3), cy: CGFloat = h * 0.27, x0: CGFloat = w * 0.05
-        let bh: CGFloat = size * 0.2, bx: CGFloat = x0 + size + w * 0.04
-        let bw: CGFloat = w * 0.95 - bx
-        let color: Color = slot == "A" ? Color(red: 1, green: 0.851, blue: 0.749) : Color(red: 0.749, green: 0.867, blue: 1) // the players' colours (field3d.js TEAM), near white: the phone gives off more light (Android the same)
-        let picture: String = info.foeChara == "chaoben" ? "AvatarChaoben" : "AvatarWizard" + slot
-        return ZStack(alignment: .topLeading) {
-            Image(picture).resizable().interpolation(.high)
-                .frame(width: size, height: size)
-                .offset(x: x0, y: cy - size / 2)
-            SlashBar(progress: share(info.foeHp, info.foeMax), color: color)
-                .frame(width: bw, height: bh)
-                .offset(x: bx, y: cy - bh / 2)
-        }
-    }
-
-    private func mine(_ info: HpInfo, w: CGFloat, h: CGFloat) -> some View {
-        let remaining = share(info.hp, info.max)
-        let gx: CGFloat = w * 0.03, gh: CGFloat = Swift.min(h * 0.12, w * 0.095)
-        let gw: CGFloat = w - 2 * gx, gy: CGFloat = h * 0.74 - gh / 2
-        let color: Color
-        if remaining > 0.5 {
-            color = Color(red: 0.224, green: 1, blue: 0.078) // vivid neon green #39FF14: stays bright and readable when reflected in a clear file (Android the same)
-        } else if remaining > 0.25 {
-            color = Color(red: 1, green: 0.941, blue: 0.722)
-        } else {
-            color = Color(red: 1, green: 0.769, blue: 0.769)
-        }
-        return ZStack(alignment: .topLeading) {
-            Text("あなた")
-                .font(.system(size: gh * 0.42, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.85))
-                .offset(x: gx + gh * 0.15, y: gy - gh * 0.72)
-            SlashBar(progress: remaining, color: color)
-                .frame(width: gw, height: gh)
-                .offset(x: gx, y: gy)
-                .animation(.easeOut(duration: 0.25), value: remaining)
-        }
-    }
-}
-
-private struct SlashBar: View {
-    let progress: CGFloat
-    let color: Color
-
-    var body: some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                SlashShape().fill(Color(red: 0.898, green: 0.169, blue: 0.169)) // the HP lost: red (Android the same)
-                    .frame(width: g.size.width, height: g.size.height)
-                if progress > 0 {
-                    SlashShape().fill(color)
-                        .frame(width: g.size.width * progress, height: g.size.height)
-                }
+    private func draw(_ ctx: GraphicsContext, _ size: CGSize, _ info: HpInfo, _ turn: Double) {
+        let bars = info.foeSlot != nil ? [HpScreen.foeR, HpScreen.mineR] : [HpScreen.mineR] // nil: a PC too old to say who the opponent is
+        // the turned bars' exact extent: each pill is its two end circles' centres turned, plus the radius all round
+        let cs = CGFloat(cos(turn)), sn = CGFloat(sin(turn))
+        let big = CGFloat.greatestFiniteMagnitude
+        var x0 = big, x1 = -big, y0 = big, y1 = -big
+        for r in bars {
+            let rad = r.height / 2, y = r.midY
+            for x in [r.minX + rad, r.maxX - rad] {
+                let rx = x * cs - y * sn, ry = x * sn + y * cs
+                x0 = Swift.min(x0, rx - rad); x1 = Swift.max(x1, rx + rad); y0 = Swift.min(y0, ry - rad); y1 = Swift.max(y1, ry + rad)
             }
-            .frame(width: g.size.width, height: g.size.height, alignment: .leading)
         }
+        let scale = Swift.min(size.width / (x1 - x0), size.height / (y1 - y0))
+        var c = ctx
+        c.translateBy(x: size.width / 2 - scale * (x0 + x1) / 2, y: size.height / 2 - scale * (y0 + y1) / 2)
+        c.scaleBy(x: scale, y: scale)
+        c.rotate(by: .radians(turn))
+        if let slot = info.foeSlot {
+            bar(c, HpScreen.foeR, share(info.foeHp, info.foeMax),
+                slot == "A" ? Color(red: 1, green: 0.502, blue: 0) : Color(red: 0, green: 0.749, blue: 1)) // the players' colours (field3d.js TEAM), pure #FF8000 / #00BFFF (Android the same)
+        }
+        let remaining = share(info.hp, info.max)
+        bar(c, HpScreen.mineR, remaining,
+            remaining > 0.5 ? Color(red: 0, green: 1, blue: 0) // pure colours: bright and readable when reflected in a clear file (Android the same)
+            : remaining > 0.25 ? Color(red: 1, green: 1, blue: 0)
+            : Color(red: 1, green: 0.502, blue: 0)) // orange #FF8000: apart from the red of the HP lost
     }
-}
 
-private struct SlashShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard rect.width > 0, rect.height > 0 else { return path }
-        let slant = Swift.min(rect.height * 0.38, rect.width * 0.25)
-        // HpScreen mirrors this shape vertically, so the visible ends slope like /.
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - slant, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX + slant, y: rect.maxY))
-        path.closeSubpath()
-        return path
+    /// the red pill (the HP lost), and the HP left filled in from the left inside the same pill (Android the same)
+    private func bar(_ c: GraphicsContext, _ r: CGRect, _ remaining: CGFloat, _ color: Color) {
+        let pill = Path(roundedRect: r, cornerRadius: r.height / 2)
+        c.fill(pill, with: .color(Color(red: 1, green: 0, blue: 0)))
+        if remaining > 0 {
+            var inside = c
+            inside.clip(to: pill)
+            inside.fill(Path(CGRect(x: r.minX, y: r.minY, width: r.width * remaining, height: r.height)), with: .color(color))
+        }
     }
 }
